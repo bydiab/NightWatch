@@ -171,12 +171,10 @@ def send_email(subject, body):
 
     context = ssl.create_default_context()
     if port == 465:
-        # Gmail-style: implicit SSL connection
         with smtplib.SMTP_SSL(host, port, context=context) as server:
             server.login(user, password)
             server.sendmail(user, [to_addr], msg.as_string())
     else:
-        # Outlook-style: plain connection upgraded to TLS
         with smtplib.SMTP(host, port) as server:
             server.starttls(context=context)
             server.login(user, password)
@@ -198,7 +196,6 @@ def main():
     else:
         watched = courses
 
-    # Load previous state
     is_first_run = not os.path.exists(STATE_FILE)
     old_state = {}
     if not is_first_run:
@@ -214,10 +211,9 @@ def main():
         new_state[key] = avail
 
         if is_first_run:
-            continue  # just build the baseline, don't alert on the first run
+            continue
 
         prev = old_state.get(key)
-        # Alert when a seat newly becomes available (0/None -> positive)
         if avail is not None and avail > 0 and (prev is None or prev <= 0):
             when = c["schedule"] or "schedule TBD"
             where = c["classroom"] or "room TBD"
