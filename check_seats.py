@@ -113,6 +113,24 @@ def parse_courses_from_html(html):
         course_name = parts[-1] if len(parts) > 1 else ""
         unique = f"{course_code}/{section}"
 
+        classroom = safe(cols, 3)
+
+        schedule_col = cols[4] if len(cols) > 4 else None
+        schedule_raw = ""
+        if schedule_col is not None:
+            schedule_text = schedule_col.get_text("\n", strip=True)
+            schedule_parts = [p.strip() for p in schedule_text.split("\n") if p.strip()]
+            days = ""
+            time = ""
+            for part in schedule_parts:
+                if part.lower().startswith("start:"):
+                    continue
+                if "-" in part:
+                    time = part
+                elif re.match(r"^[A-Z\s]+$", part):
+                    days = part
+            schedule_raw = " | ".join(p for p in [days, time] if p)
+
         capacity = safe(cols, 6)
         available = safe(cols, 7)
         instructor = safe(cols, 5)
@@ -123,6 +141,8 @@ def parse_courses_from_html(html):
             "unique": unique,
             "course_name": course_name,
             "instructor": instructor,
+            "classroom": classroom,
+            "schedule": schedule_raw,
             "capacity": capacity,
             "available": available,
         })
@@ -150,9 +170,17 @@ def send_email(subject, body):
     msg["To"] = to_addr
 
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(host, port, context=context) as server:
-        server.login(user, password)
-        server.sendmail(user, [to_addr], msg.as_string())
+    if port == 465:
+        # Gmail-style: implicit SSL connection
+        with smtplib.SMTP_SSL(host, port, context=context) as server:
+            server.login(user, password)
+            server.sendmail(user, [to_addr], msg.as_string())
+    else:
+        # Outlook-style: plain connection upgraded to TLS
+        with smtplib.SMTP(host, port) as server:
+            server.starttls(context=context)
+            server.login(user, password)
+            server.sendmail(user, [to_addr], msg.as_string())
     print(f"✓ Email sent: {subject}")
 
 
@@ -171,8 +199,9 @@ def main():
         watched = courses
 
     # Load previous state
+    is_first_run = not os.path.exists(STATE_FILE)
     old_state = {}
-    if os.path.exists(STATE_FILE):
+    if not is_first_run:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             old_state = json.load(f)
 
@@ -184,16 +213,25 @@ def main():
         avail = available_count(c["available"])
         new_state[key] = avail
 
+        if is_first_run:
+            continue  # just build the baseline, don't alert on the first run
+
         prev = old_state.get(key)
         # Alert when a seat newly becomes available (0/None -> positive)
         if avail is not None and avail > 0 and (prev is None or prev <= 0):
+            when = c["schedule"] or "schedule TBD"
+            where = c["classroom"] or "room TBD"
             alerts.append(
                 f"{c['course_code']} ({c['section']}) — {c['course_name']}\n"
                 f"  Instructor: {c['instructor']}\n"
+                f"  When: {when}\n"
+                f"  Where: {where}\n"
                 f"  Seats now available: {avail} / {c['capacity']}"
             )
 
-    if alerts:
+    if is_first_run:
+        print(f"✓ First run — saved baseline for {len(new_state)} sections, no alerts sent")
+    elif alerts:
         body = (
             f"Seat(s) opened up as of {datetime.now(timezone.utc).isoformat()}Z:\n\n"
             + "\n\n".join(alerts)
