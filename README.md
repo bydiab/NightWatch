@@ -1,6 +1,6 @@
-# FCC Course Seat Alert
+# Course Seat Alert
 
-Emails you when a seat opens up in an FCC course. Runs on GitHub Actions
+Emails you when a seat opens up. Runs on GitHub Actions
 every 5 minutes for free — no server needed.
 
 ## How it works
@@ -51,10 +51,10 @@ every 5 minutes for free — no server needed.
 ## Push to your own repo
 
 ```bash
-cd fcc-seat-alert
+cd NightWatch
 git init
 git add .
-git commit -m "Initial commit: FCC seat alert bot"
+git commit -m "Initial commit: seat alert bot"
 git branch -M main
 git remote add origin https://github.com/<your-username>/<your-repo>.git
 git push -u origin main
