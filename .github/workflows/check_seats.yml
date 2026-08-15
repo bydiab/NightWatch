@@ -1,13 +1,13 @@
-name: Check FCC seat availability
+name: Check FCC seat availability (continuous)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes (GitHub may delay a bit under load)
-  workflow_dispatch: {}       # lets you trigger it manually from the Actions tab
+    - cron: "0 */6 * * *"   # restart every 6 hours, before GitHub's ~6hr job limit
+  workflow_dispatch: {}
 
 concurrency:
   group: check-seats
-  cancel-in-progress: false   # let a running check finish instead of overlapping
+  cancel-in-progress: true   # a fresh restart replaces the old one seamlessly
 
 permissions:
   contents: write
@@ -15,6 +15,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 355   # just under 6 hours
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Run seat check
+      - name: Loop: check every ~20 seconds
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -33,14 +34,31 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
           TERM_CODE: "2026FA"
-          WATCHLIST: ""   # e.g. "COMP 111,COMP 206" — leave blank to watch everything
-        run: python check_seats.py
-
-      - name: Commit updated seat state
+          WATCHLIST: ""
         run: |
           git config user.name "seat-bot"
           git config user.email "seat-bot@users.noreply.github.com"
+
+          END=$((SECONDS + 21000))   # ~5h50m of checking, leaving buffer before restart
+          i=0
+
+          while [ $SECONDS -lt $END ]; do
+            python check_seats.py || echo "Check failed, will retry next loop"
+            i=$((i+1))
+
+            # Push state to GitHub every ~90 checks (~30 min) instead of every single check
+            if [ $((i % 90)) -eq 0 ]; then
+              git add course_data/latest_seats.json
+              git diff --staged --quiet || git commit -m "Update seat state [skip ci]"
+              git pull --rebase origin main || true
+              git push || true
+            fi
+
+            sleep 20
+          done
+
+          # Final save before this job ends / gets replaced
           git add course_data/latest_seats.json
           git diff --staged --quiet || git commit -m "Update seat state [skip ci]"
-          git pull --rebase origin main
-          git push
+          git pull --rebase origin main || true
+          git push || true
