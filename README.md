@@ -4,7 +4,7 @@ Emails you when a seat opens up. Runs on GitHub Actions
 every 5 minutes for free — no server needed.
 
 ## How it works
-- Makes ONE request to FCC's course catalog API per run (the same
+- Makes ONE request to course catalog API per run (the same
   internal endpoint the catalog page itself uses) and gets the whole
   term's seat data back at once — not thousands of requests.
 - Compares against the previous run's seat counts (stored in
