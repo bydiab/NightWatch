@@ -47,14 +47,14 @@ jobs:
             i=$((i+1))
 
             # Push state to GitHub every ~90 checks (~30 min) instead of every single check
-            if [ $((i % 90)) -eq 0 ]; then
+            if [ $((i % 180)) -eq 0 ]; then
               git add course_data/latest_seats.json
               git diff --staged --quiet || git commit -m "Update seat state [skip ci]"
               git pull --rebase origin main || true
               git push || true
             fi
 
-            sleep 20
+            sleep 10
           done
 
           # Final save before this job ends / gets replaced
