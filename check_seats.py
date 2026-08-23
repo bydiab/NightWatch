@@ -6,6 +6,9 @@ FCC's Empower SIS internal catalog API), compares seat availability
 against the previous run, and emails you when a seat opens up on a
 course you're watching (or on ANY course, if WATCHLIST is empty).
 
+Also alerts when a brand-new course section appears in the catalog
+that wasn't there on the previous run.
+
 State (previous seat counts) is stored in course_data/latest_seats.json
 so each run only alerts on a CHANGE, not on already-open seats every time.
 """
@@ -29,10 +32,8 @@ API_URL = f"{BASE_URL}/cfcs/courseCatalog.cfc?method=GetList"
 DATA_DIR = "course_data"
 STATE_FILE = os.path.join(DATA_DIR, "latest_seats.json")
 
-TERM_CODE = os.environ.get("TERM_CODE", "2026FA")  # e.g. 2026FA for 2026 Fall
+TERM_CODE = os.environ.get("TERM_CODE", "2026FA")
 
-# Comma-separated list of course codes to watch, e.g. "COMP 111,COMP 206,DLD 101"
-# Leave EMPTY ("") to watch the ENTIRE catalog.
 WATCHLIST = [c.strip().upper() for c in os.environ.get("WATCHLIST", "").split(",") if c.strip()]
 
 HEADERS = {
@@ -151,7 +152,6 @@ def parse_courses_from_html(html):
 
 
 def available_count(value):
-    """Pull the first integer out of the 'available' cell."""
     m = re.search(r"-?\d+", value or "")
     return int(m.group()) if m else None
 
@@ -213,28 +213,39 @@ def main():
         if is_first_run:
             continue
 
+        is_new_section = key not in old_state
         prev = old_state.get(key)
-        if avail is not None and avail > 0 and (prev is None or prev <= 0):
-            when = c["schedule"] or "schedule TBD"
-            where = c["classroom"] or "room TBD"
-            alerts.append(
-                f"{c['course_code']} ({c['section']}) — {c['course_name']}\n"
-                f"  Instructor: {c['instructor']}\n"
-                f"  When: {when}\n"
-                f"  Where: {where}\n"
-                f"  Seats now available: {avail} / {c['capacity']}"
-            )
+        when = c["schedule"] or "schedule TBD"
+        where = c["classroom"] or "room TBD"
+
+        if avail is not None and avail > 0:
+            if is_new_section:
+                alerts.append(
+                    f"🆕 NEW SECTION — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
+                    f"  Instructor: {c['instructor']}\n"
+                    f"  When: {when}\n"
+                    f"  Where: {where}\n"
+                    f"  Seats available: {avail} / {c['capacity']}"
+                )
+            elif prev is None or prev <= 0:
+                alerts.append(
+                    f"✅ SEAT OPENED — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
+                    f"  Instructor: {c['instructor']}\n"
+                    f"  When: {when}\n"
+                    f"  Where: {where}\n"
+                    f"  Seats now available: {avail} / {c['capacity']}"
+                )
 
     if is_first_run:
         print(f"✓ First run — saved baseline for {len(new_state)} sections, no alerts sent")
     elif alerts:
         body = (
-            f"Seat(s) opened up as of {datetime.now(timezone.utc).isoformat()}Z:\n\n"
+            f"Update as of {datetime.now(timezone.utc).isoformat()}Z:\n\n"
             + "\n\n".join(alerts)
         )
-        send_email(f"🎓 {len(alerts)} course seat(s) opened up!", body)
+        send_email(f"🎓 {len(alerts)} course update(s)!", body)
     else:
-        print("✓ No newly opened seats this run")
+        print("✓ No newly opened seats or new sections this run")
 
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(new_state, f, indent=2)
