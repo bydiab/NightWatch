@@ -6,8 +6,8 @@ FCC's Empower SIS internal catalog API), compares seat availability
 against the previous run, and emails you when a seat opens up on a
 course you're watching (or on ANY course, if WATCHLIST is empty).
 
-Also alerts when a brand-new course section appears in the catalog
-that wasn't there on the previous run.
+Also alerts on any BRAND-NEW section that appears in the catalog,
+regardless of how many seats it currently shows.
 
 State (previous seat counts) is stored in course_data/latest_seats.json
 so each run only alerts on a CHANGE, not on already-open seats every time.
@@ -217,24 +217,24 @@ def main():
         prev = old_state.get(key)
         when = c["schedule"] or "schedule TBD"
         where = c["classroom"] or "room TBD"
+        avail_display = avail if avail is not None else "unknown"
 
-        if avail is not None and avail > 0:
-            if is_new_section:
-                alerts.append(
-                    f"🆕 NEW SECTION — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
-                    f"  Instructor: {c['instructor']}\n"
-                    f"  When: {when}\n"
-                    f"  Where: {where}\n"
-                    f"  Seats available: {avail} / {c['capacity']}"
-                )
-            elif prev is None or prev <= 0:
-                alerts.append(
-                    f"✅ SEAT OPENED — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
-                    f"  Instructor: {c['instructor']}\n"
-                    f"  When: {when}\n"
-                    f"  Where: {where}\n"
-                    f"  Seats now available: {avail} / {c['capacity']}"
-                )
+        if is_new_section:
+            alerts.append(
+                f"🆕 NEW SECTION — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
+                f"  Instructor: {c['instructor']}\n"
+                f"  When: {when}\n"
+                f"  Where: {where}\n"
+                f"  Seats available: {avail_display} / {c['capacity']}"
+            )
+        elif avail is not None and avail > 0 and (prev is None or prev <= 0):
+            alerts.append(
+                f"✅ SEAT OPENED — {c['course_code']} ({c['section']}) — {c['course_name']}\n"
+                f"  Instructor: {c['instructor']}\n"
+                f"  When: {when}\n"
+                f"  Where: {where}\n"
+                f"  Seats now available: {avail} / {c['capacity']}"
+            )
 
     if is_first_run:
         print(f"✓ First run — saved baseline for {len(new_state)} sections, no alerts sent")
