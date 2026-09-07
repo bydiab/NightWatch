@@ -1,6 +1,6 @@
 {
   "ARTS 101/A": 0,
-  "ARTS 101/B": 0,
+  "ARTS 101/B": 1,
   "ARTS 102/A": 0,
   "ARTS 103/A": 0,
   "ARTS 111/A": 0,
@@ -497,7 +497,7 @@
   "EDUC 110/G": 1,
   "EDUC 110/H": 2,
   "EDUC 120/A": 0,
-  "EDUC 120/B": 2,
+  "EDUC 120/B": 3,
   "EDUC 120/C": 0,
   "EDUC 120/D": 1,
   "EDUC 120/E": 1,
