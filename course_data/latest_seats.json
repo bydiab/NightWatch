@@ -739,7 +739,7 @@
   "ISLM 100A/Q": 13,
   "ISLM 100A/R": 10,
   "ISLM 100A/S": 6,
-  "ISLM 100A/T": 13,
+  "ISLM 100A/T": 14,
   "ISLM 100A/U": 9,
   "ISLM 100A/V": 14,
   "ISLM 100A/W": 9,
@@ -1272,5 +1272,6 @@
   "URDU 510/A": 14,
   "URDU 511/A": 10,
   "URDU 517/A": 14,
-  "URDU 519/A": 13
+  "URDU 519/A": 13,
+  "URDU 699B/A": 18
 }
