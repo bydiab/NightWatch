@@ -33,7 +33,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
-          TERM_CODE: "2026FA"
+          TERM_CODE: "auto"   # follows the newest term; or set a code like "2026FA" to pin one
           WATCHLIST: ""
         run: |
           git config user.name "seat-bot"
@@ -46,7 +46,7 @@ jobs:
             python check_seats.py || echo "Check failed, will retry next loop"
             i=$((i+1))
 
-            # Push state to GitHub every ~90 checks (~30 min) instead of every single check
+            # Push state to GitHub every ~180 checks (~30 min) instead of every single check
             if [ $((i % 180)) -eq 0 ]; then
               git add course_data/latest_seats.json
               git diff --staged --quiet || git commit -m "Update seat state [skip ci]"
