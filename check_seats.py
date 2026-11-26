@@ -1,16 +1,18 @@
 """
 FCC Course Seat Alert
 ----------------------
-Fetches the FULL course catalog for a given term in ONE request (using
-FCC's Empower SIS internal catalog API), compares seat availability
-against the previous run, and emails you when a seat opens up on a
-course you're watching (or on ANY course, if WATCHLIST is empty).
+Fetches the FULL course catalog for the newest regular term (Spring / Summer /
+Fall) in ONE request, compares seat availability against the previous run, and
+emails you when:
+  - a seat opens up in a section that was full, or
+  - a brand-new section appears in the catalog.
 
-Also alerts on any BRAND-NEW section that appears in the catalog,
-regardless of how many seats it currently shows.
+The term is detected automatically from FCC's own Term dropdown, so when FCC
+adds the next semester the bot follows it. When the term changes, the first
+run silently builds a fresh baseline instead of emailing the whole catalog.
 
-State (previous seat counts) is stored in course_data/latest_seats.json
-so each run only alerts on a CHANGE, not on already-open seats every time.
+Set TERM_CODE to a specific code (e.g. 2026FA) to pin one term, or leave it
+as "auto" (default) to follow the newest.
 """
 
 import json
@@ -32,9 +34,12 @@ API_URL = f"{BASE_URL}/cfcs/courseCatalog.cfc?method=GetList"
 DATA_DIR = "course_data"
 STATE_FILE = os.path.join(DATA_DIR, "latest_seats.json")
 
-TERM_CODE = os.environ.get("TERM_CODE", "2026FA")
+TERM_SETTING = os.environ.get("TERM_CODE", "auto").strip() or "auto"
 
 WATCHLIST = [c.strip().upper() for c in os.environ.get("WATCHLIST", "").split(",") if c.strip()]
+
+SEASON_ORDER = {"winter": 0, "spring": 1, "summer": 2, "fall": 3}
+TERM_LABEL_RE = re.compile(r"^(\d{4})\s+(Winter|Spring|Summer|Fall)$", re.I)
 
 HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -56,7 +61,22 @@ def create_session():
     soup = BeautifulSoup(r.text, "html.parser")
     token_input = soup.find("input", {"name": "TOKEN"}) or soup.find("input", {"name": "token"})
     token = token_input["value"] if token_input else ""
-    return s, token
+    return s, token, soup
+
+
+def detect_latest_term(soup):
+    """Return (term_code, label) of the newest plain 'YYYY Season' term, or None."""
+    best = None
+    for opt in soup.find_all("option"):
+        label = opt.get_text(strip=True)
+        m = TERM_LABEL_RE.match(label)
+        value = (opt.get("value") or "").strip()
+        if not m or not value:
+            continue
+        rank = (int(m.group(1)), SEASON_ORDER[m.group(2).lower()])
+        if best is None or rank > best[0]:
+            best = (rank, value, label)
+    return (best[1], best[2]) if best else None
 
 
 def fetch_courses(session, token, term):
@@ -156,6 +176,27 @@ def available_count(value):
     return int(m.group()) if m else None
 
 
+# ================= STATE =================
+def load_state():
+    """Return (term_in_file, seats_dict, file_existed)."""
+    if not os.path.exists(STATE_FILE):
+        return None, {}, False
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None, {}, True
+    if isinstance(data, dict) and isinstance(data.get("seats"), dict):
+        return data.get("term"), data["seats"], True
+    # Old flat format (before term tracking): treat as unknown term
+    return None, {}, True
+
+
+def save_state(term, seats):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"term": term, "seats": seats}, f, indent=2)
+
+
 # ================= EMAIL =================
 def send_email(subject, body):
     host = os.environ["SMTP_HOST"]
@@ -186,21 +227,43 @@ def send_email(subject, body):
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    session, token = create_session()
-    html = fetch_courses(session, token, TERM_CODE)
+    old_term, old_seats, state_existed = load_state()
+
+    session, token, soup = create_session()
+
+    if TERM_SETTING.lower() == "auto":
+        detected = detect_latest_term(soup)
+        if detected:
+            term, term_label = detected
+        elif old_term:
+            term, term_label = old_term, old_term
+            print(f"! Could not detect term from the page, staying on {old_term}")
+        else:
+            raise RuntimeError("Could not detect the current term and none is saved")
+    else:
+        term, term_label = TERM_SETTING, TERM_SETTING
+
+    html = fetch_courses(session, token, term)
     courses = parse_courses_from_html(html)
-    print(f"✓ Parsed {len(courses)} course sections for {TERM_CODE}")
+    print(f"✓ Parsed {len(courses)} course sections for {term}")
+
+    if not courses:
+        # Empty/failed response: don't touch saved state, otherwise the next
+        # good run would treat every section as brand new.
+        print("! No sections returned, skipping this run")
+        return
 
     if WATCHLIST:
         watched = [c for c in courses if c["course_code"].upper() in WATCHLIST]
     else:
         watched = courses
 
-    is_first_run = not os.path.exists(STATE_FILE)
-    old_state = {}
-    if not is_first_run:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            old_state = json.load(f)
+    term_changed = (old_term != term)
+    is_baseline_run = (not state_existed) or term_changed
+    if not is_baseline_run:
+        old_state = old_seats
+    else:
+        old_state = {}
 
     new_state = {}
     alerts = []
@@ -210,7 +273,7 @@ def main():
         avail = available_count(c["available"])
         new_state[key] = avail
 
-        if is_first_run:
+        if is_baseline_run:
             continue
 
         is_new_section = key not in old_state
@@ -236,19 +299,28 @@ def main():
                 f"  Seats now available: {avail} / {c['capacity']}"
             )
 
-    if is_first_run:
-        print(f"✓ First run — saved baseline for {len(new_state)} sections, no alerts sent")
+    if is_baseline_run:
+        print(f"✓ Baseline saved for {term} ({len(new_state)} sections), no seat alerts sent")
+        if state_existed and term_changed:
+            try:
+                send_email(
+                    f"🎓 Now watching {term_label}",
+                    f"The seat alert bot switched to {term_label} ({term}).\n"
+                    f"It is tracking {len(new_state)} sections and will email you "
+                    f"from here on when a seat opens or a new section appears.",
+                )
+            except Exception as e:  # a failed notice must not block saving state
+                print(f"! Could not send term-change notice: {e}")
     elif alerts:
         body = (
-            f"Update as of {datetime.now(timezone.utc).isoformat()}Z:\n\n"
+            f"Update for {term_label} as of {datetime.now(timezone.utc).isoformat()}:\n\n"
             + "\n\n".join(alerts)
         )
         send_email(f"🎓 {len(alerts)} course update(s)!", body)
     else:
         print("✓ No newly opened seats or new sections this run")
 
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(new_state, f, indent=2)
+    save_state(term, new_state)
 
 
 if __name__ == "__main__":
